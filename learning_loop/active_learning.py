@@ -13,6 +13,7 @@ def active_learning_loop(
     n_iters: int = 30,
     M: int = 8,
     degree: int = 5,
+    model_type: str = "poly",
     bootstrap: bool = False,
     kappa_start: float = 1.6,
     kappa_end: float = 0.8,
@@ -47,7 +48,11 @@ def active_learning_loop(
         Number of surrogate models in the ensemble.
 
     degree : int
-        Maximum polynomial degree used by each surrogate.
+        Maximum polynomial degree used by each surrogate. Applies to
+        ``model_type='poly'``.
+
+    model_type : {'poly', 'tree', 'nn'}
+        Type of surrogate model to use within the ensemble.
 
     bootstrap : bool
         When ``True`` each surrogate is fit on a bootstrap-resampled dataset.
@@ -88,7 +93,14 @@ def active_learning_loop(
     print(f"Starting active learning run — initial best_y = {best_y_prev:.4f}")
 
     for t in range(n_iters):
-        models = train_ensemble(X_obs, Y_obs, M=M, degree=degree, bootstrap=bootstrap)
+        models = train_ensemble(
+            X_obs,
+            Y_obs,
+            M=M,
+            degree=degree,
+            bootstrap=bootstrap,
+            model_type=model_type,
+        )
         mu, sigma = ensemble_predict(models, X_grid)
         y_best = np.min(Y_obs)
 
