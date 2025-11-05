@@ -5,10 +5,8 @@ with lightweight surrogate models and synthetic test functions.
 
 ## Repository Structure
 
-- `acquisition_functions.py` — Acquisition heuristics such as LCB and expected improvement.
-- `active_learning.py` — Orchestrates the active learning optimization loop.
-- `ensemble_training.py` — Training helpers for the surrogate ensemble.
-- `surrogate_models.py` — Lightweight polynomial surrogate abstraction.
-- `utils.py` — Utility helpers such as deterministic seeding.
+- `learning_loop/` — Core active learning and machine learning components:
+  acquisition heuristics, ensemble training, surrogate models, and utilities.
 - `data_simulation/` — Synthetic data generators and grid utilities.
-- `notebooks/testing.ipynb` — Example notebook exercising the loop end-to-end.
+- `testing.ipynb` — Main demonstration notebook showing the active learning loop in action.
+- `notebooks/` — Reserved for optional future example notebooks.

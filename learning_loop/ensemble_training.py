@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from surrogate_models import PolynomialSurrogate
+from .surrogate_models import PolynomialSurrogate
 
 
 def _fit_polynomial(X: np.ndarray, Y: np.ndarray, degree: int) -> PolynomialSurrogate:
