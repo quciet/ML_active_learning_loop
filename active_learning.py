@@ -1,12 +1,24 @@
+"""Active learning loop orchestrating candidate selection and evaluation."""
+
 import numpy as np
-from .ensemble_training import train_ensemble, ensemble_predict
-from .acquisition_functions import lcb, expected_improvement
+
+from acquisition_functions import expected_improvement, lcb
+from ensemble_training import ensemble_predict, train_ensemble
 
 def active_learning_loop(
-    f, X_obs, Y_obs, X_grid,
-    n_iters=30, M=8, epochs=200, lr=1e-3, weight_decay=1e-4,
-    kappa_start=1.6, kappa_end=0.8, acquisition="LCB",
-    patience=10, min_improve_pct=0.01
+    f,
+    X_obs,
+    Y_obs,
+    X_grid,
+    n_iters: int = 30,
+    M: int = 8,
+    degree: int = 5,
+    bootstrap: bool = False,
+    kappa_start: float = 1.6,
+    kappa_end: float = 0.8,
+    acquisition: str = "LCB",
+    patience: int = 10,
+    min_improve_pct: float = 0.01,
 ):
     """
     Active-learning optimization loop using ensemble-based surrogates.
@@ -31,8 +43,14 @@ def active_learning_loop(
     n_iters : int
         Maximum number of iterations to run the loop.
 
-    M, epochs, lr, weight_decay : int/float
-        Training hyperparameters for ensemble models.
+    M : int
+        Number of surrogate models in the ensemble.
+
+    degree : int
+        Maximum polynomial degree used by each surrogate.
+
+    bootstrap : bool
+        When ``True`` each surrogate is fit on a bootstrap-resampled dataset.
 
     kappa_start, kappa_end : float
         Range of LCB kappa values (annealed linearly).
@@ -70,7 +88,7 @@ def active_learning_loop(
     print(f"Starting active learning run — initial best_y = {best_y_prev:.4f}")
 
     for t in range(n_iters):
-        models = train_ensemble(X_obs, Y_obs, M=M, epochs=epochs, lr=lr, weight_decay=weight_decay)
+        models = train_ensemble(X_obs, Y_obs, M=M, degree=degree, bootstrap=bootstrap)
         mu, sigma = ensemble_predict(models, X_grid)
         y_best = np.min(Y_obs)
 
