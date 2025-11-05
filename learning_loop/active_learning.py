@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from acquisition_functions import expected_improvement, lcb
-from ensemble_training import ensemble_predict, train_ensemble
+from .acquisition_functions import expected_improvement, lcb
+from .ensemble_training import ensemble_predict, train_ensemble
 
 def active_learning_loop(
     f,
