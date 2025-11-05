@@ -1,10 +1,10 @@
-"""Utilities for training and evaluating polynomial surrogate ensembles."""
+"""Utilities for training and evaluating surrogate model ensembles."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from .surrogate_models import PolynomialSurrogate
+from .surrogate_models import NNSurrogate, PolynomialSurrogate, TreeSurrogate
 
 
 def _fit_polynomial(X: np.ndarray, Y: np.ndarray, degree: int) -> PolynomialSurrogate:
@@ -13,8 +13,7 @@ def _fit_polynomial(X: np.ndarray, Y: np.ndarray, degree: int) -> PolynomialSurr
     y_flat = np.asarray(Y, dtype=float).reshape(-1)
     max_degree = max(0, len(x_flat) - 1)
     deg = min(degree, max_degree)
-    coeffs = np.polyfit(x_flat, y_flat, deg=deg)
-    return PolynomialSurrogate(coefficients=coeffs)
+    return PolynomialSurrogate.fit(x_flat, y_flat, degree=deg)
 
 
 def train_ensemble(
@@ -23,23 +22,49 @@ def train_ensemble(
     M: int = 8,
     degree: int = 5,
     bootstrap: bool = False,
-) -> list[PolynomialSurrogate]:
-    """Train an ensemble of polynomial surrogate models."""
+    model_type: str = "poly",
+):
+    """Train an ensemble of surrogate models.
+
+    Parameters
+    ----------
+    X_obs, Y_obs : array-like
+        Observed coordinates and responses.
+    M : int
+        Number of models in the ensemble.
+    degree : int
+        Polynomial degree used when ``model_type='poly'``.
+    bootstrap : bool
+        Whether to resample observations with replacement per model.
+    model_type : {'poly', 'tree', 'nn'}
+        Surrogate model family to fit.
+    """
     X_obs = np.asarray(X_obs, dtype=float)
     Y_obs = np.asarray(Y_obs, dtype=float)
 
     n = len(X_obs)
-    models: list[PolynomialSurrogate] = []
+    models = []
     for _ in range(M):
         if bootstrap and n > 1:
             idx = np.random.randint(0, n, size=n)
         else:
             idx = np.arange(n)
-        models.append(_fit_polynomial(X_obs[idx], Y_obs[idx], degree))
+        Xb, Yb = X_obs[idx], Y_obs[idx]
+
+        if model_type == "poly":
+            model = _fit_polynomial(Xb, Yb, degree)
+        elif model_type == "tree":
+            model = TreeSurrogate.fit(Xb, Yb)
+        elif model_type == "nn":
+            model = NNSurrogate.fit(Xb, Yb)
+        else:
+            raise ValueError(f"Unknown model_type: {model_type}")
+
+        models.append(model)
     return models
 
 
-def ensemble_predict(models: list[PolynomialSurrogate], X_grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def ensemble_predict(models, X_grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Evaluate each surrogate in the ensemble and return mean and standard deviation."""
     X_grid = np.asarray(X_grid, dtype=float)
     preds = np.stack([model.predict(X_grid) for model in models], axis=0)
