@@ -5,6 +5,14 @@ import numpy as np
 from .acquisition_functions import expected_improvement, lcb
 from .ensemble_training import ensemble_predict, train_ensemble
 
+
+def _format_candidate(x: np.ndarray) -> str:
+    arr = np.atleast_1d(np.asarray(x, dtype=float))
+    if arr.size == 1:
+        return f"{arr.item():.4f}"
+    return np.array2string(arr, precision=4, separator=", ")
+
+
 def active_learning_loop(
     f,
     X_obs,
@@ -19,72 +27,28 @@ def active_learning_loop(
     kappa_end: float = 0.8,
     acquisition: str = "LCB",
     patience: int = 10,
-    min_improve_pct: float = 0.01,
+    min_improve_pct: float | None = 0.01,
+    nn_config: dict | None = None,
 ):
-    """
-    Active-learning optimization loop using ensemble-based surrogates.
+    """Active-learning optimization loop using ensemble-based surrogates."""
 
-    This version maintains cumulative behavior:
-    - Each call continues from the provided X_obs, Y_obs dataset.
-    - Surrogate retrains on the expanded dataset each iteration.
-    - No automatic reset between runs — cumulative learning is expected.
-    - To start fresh, manually reinitialize X_obs and Y_obs before calling.
+    X_obs = np.array(X_obs, dtype=float, copy=True)
+    if X_obs.ndim == 1:
+        X_obs = X_obs.reshape(-1, 1)
+    else:
+        X_obs = np.atleast_2d(X_obs)
 
-    Parameters
-    ----------
-    f : callable
-        True objective function f(x) to evaluate.
+    Y_obs = np.asarray(Y_obs, dtype=float).reshape(-1)
 
-    X_obs, Y_obs : np.ndarray
-        Observed (x, y) data arrays. Passed in directly to allow continuation.
+    X_grid = np.asarray(X_grid, dtype=float)
+    if X_grid.ndim == 1:
+        X_grid = X_grid.reshape(-1, 1)
+    else:
+        X_grid = np.atleast_2d(X_grid)
 
-    X_grid : np.ndarray
-        Candidate grid for acquisition evaluation.
-
-    n_iters : int
-        Maximum number of iterations to run the loop.
-
-    M : int
-        Number of surrogate models in the ensemble.
-
-    degree : int
-        Maximum polynomial degree used by each surrogate. Applies to
-        ``model_type='poly'``.
-
-    model_type : {'poly', 'tree', 'nn'}
-        Type of surrogate model to use within the ensemble.
-
-    bootstrap : bool
-        When ``True`` each surrogate is fit on a bootstrap-resampled dataset.
-
-    kappa_start, kappa_end : float
-        Range of LCB kappa values (annealed linearly).
-
-    acquisition : {'LCB', 'EI'}
-        Acquisition function type.
-
-    patience : int
-        Number of consecutive non-improving iterations before stopping.
-
-    min_improve_pct : float
-        Minimum relative (%-based) improvement threshold per iteration.
-
-    Returns
-    -------
-    X_obs, Y_obs : np.ndarray
-        Updated datasets including new points (expanded cumulatively).
-
-    history : np.ndarray
-        Iteration history: (t, x_next, y_next, best_y).
-
-    results_cache : dict
-        Cached evaluations {x: y}.
-    """
-
-    X_obs = np.copy(X_obs)
-    Y_obs = np.copy(Y_obs)
-
-    results_cache = {round(float(x), 6): float(y) for x, y in zip(X_obs, Y_obs)}
+    results_cache = {
+        tuple(np.round(np.atleast_1d(x), 6)): float(y) for x, y in zip(X_obs, Y_obs)
+    }
     kappas = np.linspace(kappa_start, kappa_end, n_iters)
     history = []
     no_improve_counter = 0
@@ -100,6 +64,7 @@ def active_learning_loop(
             degree=degree,
             bootstrap=bootstrap,
             model_type=model_type,
+            nn_config=nn_config,
         )
         mu, sigma = ensemble_predict(models, X_grid)
         y_best = np.min(Y_obs)
@@ -114,44 +79,50 @@ def active_learning_loop(
             raise ValueError(f"Unknown acquisition: {acquisition}")
 
         x_next = None
+        x_next_array = None
         for idx in sort_order:
-            candidate = float(X_grid[idx, 0])
-            key = round(candidate, 6)
+            candidate = np.atleast_1d(np.asarray(X_grid[idx], dtype=float))
+            key = tuple(np.round(candidate, 6))
             if key not in results_cache:
-                x_next = candidate
+                x_next = candidate.item() if candidate.size == 1 else candidate
+                x_next_array = candidate
                 break
-        if x_next is None:
+        if x_next_array is None:
             print("All candidates evaluated. Stopping early.")
             break
 
-        key = round(x_next, 6)
+        key = tuple(np.round(x_next_array, 6))
         if key in results_cache:
             y_next = results_cache[key]
             reused = True
         else:
-            y_next = f(x_next)
+            eval_point = x_next
+            y_next = f(eval_point)
             results_cache[key] = y_next
             reused = False
 
-        X_obs = np.append(X_obs, x_next)
+        X_obs = np.vstack([X_obs, x_next_array])
         Y_obs = np.append(Y_obs, y_next)
         best_y_curr = float(np.min(Y_obs))
         history.append((t, x_next, y_next, best_y_curr))
 
-        print(f"[{t+1:03d}/{n_iters}] acq={acquisition}, x_next={x_next:.4f}, y_next={y_next:.4f} "
-              f"({'reused' if reused else 'new'}), best_y={best_y_curr:.4f}")
+        print(
+            f"[{t+1:03d}/{n_iters}] acq={acquisition}, x_next={_format_candidate(x_next_array)}, "
+            f"y_next={y_next:.4f} ({'reused' if reused else 'new'}), best_y={best_y_curr:.4f}"
+        )
 
-        rel_change = abs(best_y_curr - best_y_prev) / (abs(best_y_prev) + 1e-8)
-        if rel_change < min_improve_pct:
-            no_improve_counter += 1
-        else:
-            no_improve_counter = 0
-
-        if no_improve_counter >= patience:
-            print(f"Stopping early: no stepwise improvement > {min_improve_pct*100:.2f}% "
-                  f"for {patience} consecutive iterations.")
-            break
-
+        if min_improve_pct is not None:
+            rel_change = abs(best_y_curr - best_y_prev) / (abs(best_y_prev) + 1e-8)
+            if rel_change < min_improve_pct:
+                no_improve_counter += 1
+            else:
+                no_improve_counter = 0
+            if no_improve_counter >= patience:
+                print(
+                    "Stopping early: no improvement > "
+                    f"{min_improve_pct*100:.2f}% for {patience} consecutive iterations."
+                )
+                break
         best_y_prev = best_y_curr
 
-    return X_obs, Y_obs, np.array(history), results_cache
+    return X_obs, Y_obs, np.array(history, dtype=object), results_cache
