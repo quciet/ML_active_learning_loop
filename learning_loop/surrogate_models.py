@@ -6,31 +6,36 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 from sklearn.tree import DecisionTreeRegressor
 from torch import nn, optim
 
 
 @dataclass
 class PolynomialSurrogate:
-    """One-dimensional polynomial surrogate storing its coefficients."""
+    """Multivariate polynomial surrogate using sklearn's PolynomialFeatures."""
 
-    coefficients: np.ndarray
+    model: LinearRegression
+    poly: PolynomialFeatures
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Evaluate the polynomial at the provided coordinates."""
-        X = np.asarray(X, dtype=float).reshape(-1)
-        values = np.polyval(self.coefficients, X)
-        return values.reshape(-1)
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        Xp = self.poly.transform(X)
+        return self.model.predict(Xp)
 
     @classmethod
-    def fit(cls, X: np.ndarray, Y: np.ndarray, degree: int = 5) -> "PolynomialSurrogate":
-        """Fit a polynomial of the specified degree to the provided data."""
-        coeffs = np.polyfit(np.asarray(X).flatten(), np.asarray(Y).flatten(), deg=degree)
-        return cls(coefficients=coeffs)
+    def fit(cls, X: np.ndarray, Y: np.ndarray, degree: int = 3) -> "PolynomialSurrogate":
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        Y = np.asarray(Y, dtype=float).flatten()
+        poly = PolynomialFeatures(degree=degree, include_bias=True)
+        Xp = poly.fit_transform(X)
+        reg = LinearRegression().fit(Xp, Y)
+        return cls(model=reg, poly=poly)
 
 
 class TreeSurrogate:
-    """Decision-tree based surrogate model wrapper."""
+    """Decision-tree surrogate that supports multi-dimensional X."""
 
     def __init__(self, model: DecisionTreeRegressor):
         self.model = model
@@ -43,16 +48,19 @@ class TreeSurrogate:
         max_depth: int = 5,
         random_state: int | None = None,
     ) -> "TreeSurrogate":
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        Y = np.asarray(Y, dtype=float).flatten()
         reg = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
-        reg.fit(np.asarray(X).reshape(-1, 1), np.asarray(Y).reshape(-1))
+        reg.fit(X, Y)
         return cls(reg)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return self.model.predict(np.asarray(X).reshape(-1, 1))
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        return self.model.predict(X)
 
 
 class NNSurrogate:
-    """Small neural-network surrogate model implemented with PyTorch."""
+    """Configurable PyTorch neural-network surrogate supporting multi-dimensional X."""
 
     def __init__(self, model: nn.Module):
         self.model = model
@@ -62,13 +70,38 @@ class NNSurrogate:
         cls,
         X: np.ndarray,
         Y: np.ndarray,
+        hidden_layers: list[int] = [32, 32],
+        activation: str = "relu",
+        dropout: float = 0.0,
         epochs: int = 200,
         lr: float = 1e-3,
     ) -> "NNSurrogate":
-        X_t = torch.tensor(np.asarray(X).reshape(-1, 1), dtype=torch.float32)
-        Y_t = torch.tensor(np.asarray(Y).reshape(-1, 1), dtype=torch.float32)
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        Y = np.asarray(Y, dtype=float).reshape(-1, 1)
 
-        model = nn.Sequential(nn.Linear(1, 32), nn.ReLU(), nn.Linear(32, 1))
+        X_t = torch.tensor(X, dtype=torch.float32)
+        Y_t = torch.tensor(Y, dtype=torch.float32)
+
+        act_map = {
+            "relu": nn.ReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "leakyrelu": nn.LeakyReLU,
+        }
+        act_cls = act_map.get(activation.lower(), nn.ReLU)
+
+        layers: list[nn.Module] = []
+        input_dim = X_t.shape[1]
+        for h in hidden_layers:
+            layers += [nn.Linear(input_dim, h), act_cls()]
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            input_dim = h
+        layers.append(nn.Linear(input_dim, 1))
+        model = nn.Sequential(*layers)
+
         optimizer = optim.Adam(model.parameters(), lr=lr)
         criterion = nn.MSELoss()
 
@@ -80,10 +113,14 @@ class NNSurrogate:
             loss.backward()
             optimizer.step()
 
-        return cls(model.eval())
+        model.eval()
+        return cls(model)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        X_t = torch.tensor(np.asarray(X).reshape(-1, 1), dtype=torch.float32)
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        X_t = torch.tensor(X, dtype=torch.float32)
         with torch.no_grad():
             preds = self.model(X_t)
         return preds.cpu().numpy().flatten()

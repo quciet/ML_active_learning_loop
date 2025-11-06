@@ -8,12 +8,11 @@ from .surrogate_models import NNSurrogate, PolynomialSurrogate, TreeSurrogate
 
 
 def _fit_polynomial(X: np.ndarray, Y: np.ndarray, degree: int) -> PolynomialSurrogate:
-    """Fit a polynomial surrogate of the specified degree."""
-    x_flat = np.asarray(X, dtype=float).reshape(-1)
-    y_flat = np.asarray(Y, dtype=float).reshape(-1)
-    max_degree = max(0, len(x_flat) - 1)
-    deg = min(degree, max_degree)
-    return PolynomialSurrogate.fit(x_flat, y_flat, degree=deg)
+    X = np.atleast_2d(np.asarray(X, dtype=float))
+    Y = np.asarray(Y, dtype=float)
+    if len(X) < 2:
+        return PolynomialSurrogate.fit(X, Y, degree=0)
+    return PolynomialSurrogate.fit(X, Y, degree=degree)
 
 
 def train_ensemble(
@@ -23,6 +22,7 @@ def train_ensemble(
     degree: int = 5,
     bootstrap: bool = False,
     model_type: str = "poly",
+    nn_config: dict | None = None,
 ):
     """Train an ensemble of surrogate models.
 
@@ -56,7 +56,7 @@ def train_ensemble(
         elif model_type == "tree":
             model = TreeSurrogate.fit(Xb, Yb)
         elif model_type == "nn":
-            model = NNSurrogate.fit(Xb, Yb)
+            model = NNSurrogate.fit(Xb, Yb, **(nn_config or {}))
         else:
             raise ValueError(f"Unknown model_type: {model_type}")
 
